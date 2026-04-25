@@ -1,122 +1,109 @@
 import React from 'react';
 
 /**
- * FossilCard Component - Individual fossil display card
- * 
- * Displays:
- * - Fossil name and species
- * - Age and weight
- * - Theoretical velocity
- * - Status badge
- * - AI description button
+ * FossilCard — Individual fossil display card.
+ *
+ * NOTE: Tailwind is loaded once in index.html — never inline <script> tags here.
  */
-<script src="https://cdn.tailwindcss.com"></script>
 export const FossilCard = ({ fossil, onAISuggest }) => {
-  const getStatusColor = (status) => {
-    const colors = {
-      'extinct': 'bg-red-100 text-red-800',
-      'documented': 'bg-blue-100 text-blue-800',
-      'active': 'bg-green-100 text-green-800',
-      'pending-analysis': 'bg-yellow-100 text-yellow-800',
-    };
-    return colors[status] || 'bg-stone-100 text-stone-800';
+  const statusColors = {
+    extinct:           'bg-red-100 text-red-800 border-red-200',
+    documented:        'bg-blue-100 text-blue-800 border-blue-200',
+    active:            'bg-green-100 text-green-800 border-green-200',
+    'pending-analysis':'bg-yellow-100 text-yellow-800 border-yellow-200',
   };
 
-  const getVelocityIcon = (velocity) => {
-    if (velocity === 'raptor-speed (40 km/h)') return '⚡';
-    if (typeof velocity === 'number') {
-      if (velocity >= 18) return '🏃';
-      if (velocity >= 10) return '🚶';
-    }
+  const velocityIcon = (v) => {
+    if (v === 'raptor-speed (40 km/h)') return '⚡';
+    if (typeof v === 'number' && v >= 18)  return '🏃';
+    if (typeof v === 'number' && v >= 10)  return '🚶';
     return '🦕';
   };
 
+  const statusClass = statusColors[fossil.status] ?? 'bg-stone-100 text-stone-800 border-stone-200';
+
   return (
-    <div className="bg-white rounded-lg shadow-lg hover:shadow-2xl transition-shadow duration-300 overflow-hidden border-2 border-amber-100 hover:border-amber-300">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-amber-600 to-orange-600 px-6 py-4">
-        <div className="flex items-start justify-between">
-          <div>
-            <h3 className="text-xl font-bold text-white">
-              {fossil.species}
-            </h3>
-            <p className="text-amber-100 text-sm">{fossil.collectionName}</p>
-          </div>
-          <span className={`px-3 py-1 rounded-full font-semibold text-xs ${getStatusColor(fossil.status)}`}>
-            {fossil.status}
-          </span>
+    <div className="bg-white rounded-xl shadow-md hover:shadow-xl transition-shadow duration-300 overflow-hidden border border-amber-100 hover:border-amber-300 flex flex-col">
+
+      {/* Card header */}
+      <div className="bg-gradient-to-r from-amber-700 to-orange-700 px-5 py-4 flex items-start justify-between">
+        <div className="min-w-0 pr-2">
+          <h3 className="text-lg font-bold text-white truncate">{fossil.species}</h3>
+          <p className="text-amber-200 text-xs mt-0.5 truncate">{fossil.collectionName}</p>
         </div>
+        <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold border ${statusClass}`}>
+          {fossil.status}
+        </span>
       </div>
 
-      {/* Body */}
-      <div className="px-6 py-4">
-        {/* Age & Weight */}
-        <div className="grid grid-cols-2 gap-4 mb-4">
+      {/* Card body */}
+      <div className="px-5 py-4 flex-1 space-y-3">
+
+        {/* Age + Weight */}
+        <div className="grid grid-cols-2 gap-3">
           <div>
-            <p className="text-stone-600 text-sm font-semibold uppercase">Age</p>
+            <p className="text-stone-500 text-xs font-semibold uppercase tracking-wide">Age</p>
             <p className="text-2xl font-bold text-amber-900">{fossil.estimatedAge}M</p>
-            <p className="text-xs text-stone-500">million years ago</p>
+            <p className="text-xs text-stone-400">million years ago</p>
           </div>
           <div>
-            <p className="text-stone-600 text-sm font-semibold uppercase">Weight</p>
-            <p className="text-2xl font-bold text-amber-900">{fossil.weight.toLocaleString()}kg</p>
-            <p className="text-xs text-stone-500">{fossil.weightCategory}</p>
+            <p className="text-stone-500 text-xs font-semibold uppercase tracking-wide">Weight</p>
+            <p className="text-2xl font-bold text-amber-900">{fossil.weight.toLocaleString()} kg</p>
+            <p className="text-xs text-stone-400">{fossil.weightCategory}</p>
           </div>
         </div>
 
         {/* Era */}
-        <div className="mb-4 p-3 bg-stone-100 rounded">
-          <p className="text-stone-600 text-xs font-semibold">ERA</p>
-          <p className="text-lg font-bold text-stone-800">{fossil.era}</p>
+        <div className="px-3 py-2 bg-stone-100 rounded-lg">
+          <p className="text-stone-500 text-xs font-semibold uppercase tracking-wide">Era</p>
+          <p className="text-stone-800 font-semibold">{fossil.era}</p>
         </div>
 
-        {/* Discovery Location */}
-        <div className="mb-4">
-          <p className="text-stone-600 text-xs font-semibold">DISCOVERY LOCATION</p>
-          <p className="text-stone-700">{fossil.discoveryLocation}</p>
+        {/* Location */}
+        <div>
+          <p className="text-stone-500 text-xs font-semibold uppercase tracking-wide">Discovery Location</p>
+          <p className="text-stone-700 text-sm">{fossil.discoveryLocation}</p>
         </div>
 
         {/* Velocity */}
-        <div className="flex items-center gap-2 mb-4 p-3 bg-orange-50 rounded border border-orange-200">
-          <span className="text-2xl">{getVelocityIcon(fossil.theoreticalVelocity)}</span>
+        <div className="flex items-center gap-2 px-3 py-2 bg-orange-50 rounded-lg border border-orange-100">
+          <span className="text-xl">{velocityIcon(fossil.theoreticalVelocity)}</span>
           <div>
-            <p className="text-stone-600 text-xs font-semibold">VELOCITY</p>
-            <p className="text-stone-700 font-semibold">
-              {typeof fossil.theoreticalVelocity === 'string'
-                ? fossil.theoreticalVelocity
-                : `${fossil.theoreticalVelocity} m/s`}
+            <p className="text-stone-500 text-xs font-semibold uppercase tracking-wide">Velocity</p>
+            <p className="text-stone-800 text-sm font-semibold">
+              {typeof fossil.theoreticalVelocity === 'number'
+                ? `${fossil.theoreticalVelocity} m/s`
+                : fossil.theoreticalVelocity}
             </p>
           </div>
         </div>
 
-        {/* AI Description Preview */}
+        {/* AI description preview (if already generated) */}
         {fossil.aiDescription && (
-          <div className="mb-4 p-3 bg-blue-50 rounded border border-blue-200">
-            <p className="text-xs font-semibold text-blue-900 mb-1">🤖 AI DESCRIPTION</p>
-            <p className="text-sm text-blue-900 line-clamp-3">{fossil.aiDescription}</p>
+          <div className="px-3 py-2 bg-blue-50 rounded-lg border border-blue-100">
+            <p className="text-blue-700 text-xs font-semibold mb-1">🤖 AI DESCRIPTION</p>
+            <p className="text-blue-900 text-sm line-clamp-3">{fossil.aiDescription}</p>
           </div>
         )}
       </div>
 
-      {/* Footer with Actions */}
-      <div className="px-6 py-4 bg-stone-50 border-t border-stone-200 flex gap-2">
+      {/* Card actions */}
+      <div className="px-5 py-3 bg-stone-50 border-t border-stone-100 flex gap-2">
         <button
           onClick={() => onAISuggest(fossil)}
-          className="flex-1 bg-gradient-to-r from-blue-600 to-purple-600 text-white px-4 py-2 rounded font-semibold hover:from-blue-700 hover:to-purple-700 transition-all duration-200 text-sm flex items-center justify-center gap-2"
+          className="flex-1 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-3 py-2 rounded-lg text-sm font-semibold transition-all duration-200 flex items-center justify-center gap-1.5"
         >
           <span>🤖</span>
           <span>AI Suggest</span>
         </button>
-        <button
-          className="flex-1 bg-stone-200 text-stone-800 px-4 py-2 rounded font-semibold hover:bg-stone-300 transition-colors duration-200 text-sm"
-        >
+        <button className="flex-1 bg-stone-200 hover:bg-stone-300 text-stone-800 px-3 py-2 rounded-lg text-sm font-semibold transition-colors duration-200">
           View Details →
         </button>
       </div>
 
-      {/* Easter Egg - Hover indicator */}
-      <div className="px-6 py-2 bg-gradient-to-r from-stone-900 to-black text-center">
-        <p className="text-xs text-stone-400">ID: {fossil.id}</p>
+      {/* ID footer */}
+      <div className="px-5 py-1.5 bg-stone-900 text-center">
+        <p className="text-stone-500 text-xs font-mono">{fossil.id}</p>
       </div>
     </div>
   );

@@ -3,140 +3,177 @@
 declare(strict_types=1);
 
 /**
- * PaleoCRM API Router
- * 
- * Entry point for all REST API requests
- * Usage: php -S localhost:8000 public/index.php
+ * PaleoCRM — PHP Router / Entry Point
+ *
+ * Routes:
+ *   GET    /api/fossils                  → FossilController::list
+ *   GET    /api/fossils/{id}             → FossilController::show
+ *   POST   /api/fossils                  → FossilController::create
+ *   PUT    /api/fossils/{id}             → FossilController::update
+ *   DELETE /api/fossils/{id}             → FossilController::delete
+ *   GET    /api/statistics/velocity      → FossilController::velocityReport
+ *   POST   /api/fossils/export/csv       → FossilController::exportCSV
+ *   POST   /api/fossils/{id}/ai-describe → generate & return AI description
  */
 
-require_once __DIR__ . '/../vendor/autoload.php';
+require_once __DIR__ . '/vendor/autoload.php';
 
-use PaleoCRM\Database;
-use PaleoCRM\Controller\FossilController;
-use PaleoCRM\Service\FossilService;
-use PaleoCRM\Service\AIDescriptionService;
-use PaleoCRM\Repository\FossilRepository;
-
-// Load environment variables with proper error handling
-$envFile = __DIR__ . '/../.env';
+// ── 1. Load .env ──────────────────────────────────────────────────────────────
+$envFile = __DIR__ . '/.env';
 if (file_exists($envFile)) {
-    $env = @parse_ini_file($envFile);
-    if ($env === false) {
-        // Fallback: read .env file manually if parse_ini_file fails
-        $env = [];
-        $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-        foreach ($lines as $line) {
-            if (strpos($line, '=') && !str_starts_with(trim($line), '#')) {
-                [$key, $value] = explode('=', $line, 2);
-                $env[trim($key)] = trim($value);
-            }
+    foreach (file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
+        if (str_starts_with(trim($line), '#') || !str_contains($line, '=')) {
+            continue;
         }
-    }
-    foreach ($env as $key => $value) {
-        $_ENV[$key] = $value;
+        [$key, $value] = explode('=', $line, 2);
+        $_ENV[trim($key)] = trim($value, " \t\n\r\0\x0B\"'");
     }
 }
 
-// Enable error display in development
-if ($_ENV['APP_DEBUG'] ?? false) {
-    error_reporting(E_ALL);
-    ini_set('display_errors', '1');
+// ── 2. CORS headers (must be sent before any output) ─────────────────────────
+$allowedOrigins = explode(',', $_ENV['CORS_ORIGINS'] ?? 'http://localhost:5173,http://localhost:3000');
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+
+if (in_array($origin, $allowedOrigins, true) || ($_ENV['APP_ENV'] ?? 'production') === 'development') {
+    header('Access-Control-Allow-Origin: ' . ($origin ?: '*'));
+} else {
+    header('Access-Control-Allow-Origin: ' . ($allowedOrigins[0] ?? '*'));
 }
 
-/**
- * CORS Headers
- */
-function addCorsHeaders(): void
-{
-    $allowedOrigins = $_ENV['CORS_ALLOWED_ORIGINS'] ?? 'http://localhost:5173';
-    $origins = array_map('trim', explode(',', $allowedOrigins));
-    $requestOrigin = $_SERVER['HTTP_ORIGIN'] ?? '';
+header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
+header('Access-Control-Max-Age: 86400');
+header('X-Dino-Powered: Velociraptors optimize this endpoint 🦖');
 
-    if (in_array($requestOrigin, $origins, true)) {
-        header("Access-Control-Allow-Origin: {$requestOrigin}");
-    }
-
-    header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-    header('Access-Control-Allow-Headers: Content-Type, Authorization');
-    header('Access-Control-Allow-Credentials: true');
-    header('Access-Control-Max-Age: 86400');
-}
-
-addCorsHeaders();
-
-// Handle preflight requests
+// Handle pre-flight
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
+    http_response_code(204);
     exit;
 }
 
-// Setup database connection
-$pdo = Database::connect();
+// ── 3. Bootstrap services ─────────────────────────────────────────────────────
+use PaleoCRM\Database;
+use PaleoCRM\Repository\FossilRepository;
+use PaleoCRM\Service\AIDescriptionService;
+use PaleoCRM\Service\FossilService;
+use PaleoCRM\Controller\FossilController;
 
-// Setup services with dependency injection
-$fossilRepository = new FossilRepository($pdo);
-$apiKey = $_ENV['ANTHROPIC_API_KEY'] ?? '';
-$aiService = new AIDescriptionService($apiKey);
-$fossilService = new FossilService($fossilRepository, $aiService);
-
-// Create controller
-$controller = new FossilController($fossilService);
-
-// Parse request
-$method = $_SERVER['REQUEST_METHOD'];
-$path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-$path = str_replace('/api', '', $path); // Remove /api prefix if present
-$query = $_GET ?? [];
-
-// Simple router
 try {
-    $response = match (true) {
-        // List fossils
-        $method === 'GET' && $path === '/fossils' => $controller->list($query),
-        // Get single fossil
-        $method === 'GET' && preg_match('#^/fossils/([^/]+)$#', $path, $matches) => $controller->show($matches[1]),
-        // Create fossil
-        $method === 'POST' && $path === '/fossils' => $controller->create(json_decode(file_get_contents('php://input'), true) ?? []),
-        // Update fossil
-        $method === 'PUT' && preg_match('#^/fossils/([^/]+)$#', $path, $matches) => $controller->update($matches[1], json_decode(file_get_contents('php://input'), true) ?? []),
-        // Delete fossil
-        $method === 'DELETE' && preg_match('#^/fossils/([^/]+)$#', $path, $matches) => $controller->delete($matches[1]),
-        // Velocity report
-        $method === 'GET' && $path === '/statistics/velocity' => $controller->velocityReport(),
-        // Export CSV
-        $method === 'POST' && $path === '/fossils/export/csv' => $controller->exportCSV(json_decode(file_get_contents('php://input'), true) ?? []),
-        // 404
-        default => [
-            'statusCode' => 404,
-            'contentType' => 'application/json',
-            'body' => ['success' => false, 'error' => 'Endpoint not found']
-        ]
-    };
-} catch (Exception $e) {
-    $response = [
-        'statusCode' => 500,
-        'contentType' => 'application/json',
-        'body' => [
-            'success' => false,
-            'error' => $_ENV['APP_DEBUG'] ? $e->getMessage() : 'Internal server error'
-        ]
-    ];
+    $pdo        = Database::connect();
+    $repository = new FossilRepository($pdo);
+    $aiService  = new AIDescriptionService(
+        apiKey: $_ENV['ANTHROPIC_API_KEY'] ?? throw new \RuntimeException('ANTHROPIC_API_KEY not set'),
+        model:  $_ENV['CLAUDE_MODEL'] ?? 'claude-sonnet-4-20250514',
+    );
+    $service    = new FossilService($repository, $aiService);
+    $controller = new FossilController($service);
+} catch (\RuntimeException $e) {
+    sendJson(['success' => false, 'error' => $e->getMessage()], 500);
+    exit;
 }
 
-// Send response
-http_response_code($response['statusCode']);
-header('Content-Type: ' . ($response['contentType'] ?? 'application/json'));
+// ── 4. Route matching ─────────────────────────────────────────────────────────
+$method = $_SERVER['REQUEST_METHOD'];
+$uri    = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+$uri    = rtrim($uri, '/');
+$body   = json_decode(file_get_contents('php://input') ?: '{}', true) ?? [];
 
-// Add any custom headers
-if (!empty($response['headers'])) {
-    foreach ($response['headers'] as $header => $value) {
-        header("{$header}: {$value}");
+// /api/statistics/velocity
+if ($method === 'GET' && $uri === '/api/statistics/velocity') {
+    respond($controller->velocityReport());
+    exit;
+}
+
+// /api/fossils/export/csv
+if ($method === 'POST' && $uri === '/api/fossils/export/csv') {
+    $result = $controller->exportCSV($body);
+    if ($result['contentType'] === 'text/csv') {
+        header('Content-Type: text/csv');
+        header('Content-Disposition: attachment; filename="fossils_export.csv"');
+        http_response_code(200);
+        echo $result['body'];
+        exit;
     }
+    respond($result);
+    exit;
 }
 
-// Send body
-if ($response['contentType'] === 'application/json') {
-    echo json_encode($response['body'], JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
-} else {
-    echo $response['body'];
+// /api/fossils/{id}/ai-describe
+if ($method === 'POST' && preg_match('#^/api/fossils/([^/]+)/ai-describe$#', $uri, $m)) {
+    $fossil = $service->getFossilById($m[1]);
+    if ($fossil === null) {
+        sendJson(['success' => false, 'error' => 'Fossil not found'], 404);
+        exit;
+    }
+
+    // Stream SSE response so frontend can show tokens as they arrive
+    header('Content-Type: text/event-stream');
+    header('Cache-Control: no-cache');
+    header('X-Accel-Buffering: no'); // nginx: disable proxy buffering
+    ob_implicit_flush(true);
+
+    $fullText = '';
+    try {
+        $aiService->generateDescriptionStream($fossil, function (string $chunk) use (&$fullText) {
+            // Each chunk may contain multiple SSE lines from Anthropic
+            foreach (explode("\n", $chunk) as $line) {
+                if (!str_starts_with($line, 'data: ')) {
+                    continue;
+                }
+                $json = json_decode(substr($line, 6), true);
+                if (($json['type'] ?? '') === 'content_block_delta') {
+                    $text = $json['delta']['text'] ?? '';
+                    $fullText .= $text;
+                    // Forward to browser
+                    echo 'data: ' . json_encode(['text' => $text]) . "\n\n";
+                }
+            }
+        });
+        // Persist finished description
+        $fossil->setAIDescription($fullText);
+        $repository->update($fossil);
+        echo 'data: ' . json_encode(['done' => true, 'fossilId' => $fossil->id]) . "\n\n";
+    } catch (\Exception $e) {
+        echo 'data: ' . json_encode(['error' => $e->getMessage()]) . "\n\n";
+    }
+    exit;
+}
+
+// /api/fossils/{id}
+if (preg_match('#^/api/fossils/([^/]+)$#', $uri, $m)) {
+    $id = $m[1];
+    match ($method) {
+        'GET'    => respond($controller->show($id)),
+        'PUT'    => respond($controller->update($id, $body)),
+        'DELETE' => respond($controller->delete($id)),
+        default  => sendJson(['success' => false, 'error' => 'Method not allowed'], 405),
+    };
+    exit;
+}
+
+// /api/fossils
+if ($uri === '/api/fossils') {
+    match ($method) {
+        'GET'  => respond($controller->list($_GET)),
+        'POST' => respond($controller->create($body)),
+        default => sendJson(['success' => false, 'error' => 'Method not allowed'], 405),
+    };
+    exit;
+}
+
+// 404 fallback
+sendJson(['success' => false, 'error' => "Route not found: {$method} {$uri}"], 404);
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function respond(array $result): void
+{
+    sendJson($result['body'], $result['statusCode']);
+}
+
+function sendJson(array $data, int $status = 200): void
+{
+    header('Content-Type: application/json');
+    http_response_code($status);
+    echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 }

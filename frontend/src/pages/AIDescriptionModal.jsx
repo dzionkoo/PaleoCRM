@@ -1,132 +1,212 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+
+const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
 
 /**
- * AIDescriptionModal Component - AI description generation modal
- * 
- * Shows:
- * - Fossil details
- * - AI-generated description loading state
- * - Final description with copy button
+ * AIDescriptionModal
+ *
+ * Streams the AI description from the PHP backend via Server-Sent Events.
+ * Tokens appear word-by-word as Claude generates them.
  */
-export const AIDescriptionModal = ({ fossil, loading, onClose }) => {
-  const [isCopied, setIsCopied] = React.useState(false);
+export const AIDescriptionModal = ({ fossil, onClose, onDescriptionSaved }) => {
+  const [streamedText, setStreamedText] = useState('');
+  const [isStreaming, setIsStreaming] = useState(true);
+  const [isCopied, setIsCopied] = useState(false);
+  const [streamError, setStreamError] = useState(null);
+  const readerRef = useRef(null);
 
-  const mockAIDescription = `This remarkable ${fossil.species} specimen from the ${fossil.era} period represents a significant addition to our paleontological understanding. Weighing approximately ${fossil.weight}kg and estimated at ${fossil.estimatedAge} million years old, this fossil showcases exceptional preservation.
+  // ── Kick off SSE stream when the modal mounts ──────────────────────────────
+  useEffect(() => {
+    let cancelled = false;
 
-The specimen was discovered at ${fossil.discoveryLocation} and is now part of the ${fossil.collectionName}. Based on skeletal structure analysis, we can infer theoretical movement capabilities suggesting a velocity of approximately ${fossil.theoreticalVelocity}.
+    const stream = async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE}/api/fossils/${fossil.id}/ai-describe`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
 
-This particular fossil demonstrates key adaptations to its environment and provides crucial insights into evolution during its geological epoch. The preservation quality is outstanding, allowing for detailed morphological analysis.`;
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error ?? `HTTP ${res.status}`);
+        }
+
+        const reader = res.body.getReader();
+        readerRef.current = reader;
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (!cancelled) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+
+          // Process complete SSE lines
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? ''; // keep the incomplete last line
+
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            try {
+              const json = JSON.parse(line.slice(6));
+              if (json.error) throw new Error(json.error);
+              if (json.text && !cancelled) {
+                setStreamedText(prev => prev + json.text);
+              }
+              if (json.done && onDescriptionSaved) {
+                onDescriptionSaved(json.fossilId);
+              }
+            } catch {
+              // non-JSON or partial — skip
+            }
+          }
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setStreamError(err?.message ?? 'Streaming failed');
+          // Fall back: show a static description built from fossil data
+          setStreamedText(buildFallbackDescription(fossil));
+        }
+      } finally {
+        if (!cancelled) setIsStreaming(false);
+      }
+    };
+
+    stream();
+
+    return () => {
+      cancelled = true;
+      readerRef.current?.cancel().catch(() => {});
+    };
+  }, [fossil.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(mockAIDescription);
-    setIsCopied(true);
-    setTimeout(() => setIsCopied(false), 2000);
+    navigator.clipboard.writeText(streamedText).then(() => {
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 2000);
+    });
+  };
+
+  const handleClose = () => {
+    readerRef.current?.cancel().catch(() => {});
+    onClose();
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        
+    <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+
         {/* Header */}
-        <div className="sticky top-0 bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-4 flex items-center justify-between">
+        <div className="sticky top-0 bg-gradient-to-r from-blue-700 to-purple-700 text-white px-6 py-4 flex items-center justify-between rounded-t-xl">
           <div className="flex items-center gap-3">
             <span className="text-2xl">🤖</span>
-            <h2 className="text-2xl font-bold">AI Description Generator</h2>
+            <h2 className="text-xl font-bold">AI Description Generator</h2>
           </div>
           <button
-            onClick={onClose}
-            className="text-2xl font-bold hover:opacity-80 transition"
+            onClick={handleClose}
+            className="text-white/80 hover:text-white text-2xl font-bold transition-colors"
+            aria-label="Close"
           >
             ✕
           </button>
         </div>
 
         {/* Content */}
-        <div className="p-6">
-          {/* Fossil Info */}
-          <div className="mb-6 p-4 bg-stone-100 rounded-lg border-l-4 border-stone-400">
+        <div className="p-6 space-y-5">
+
+          {/* Fossil metadata */}
+          <div className="p-4 bg-stone-100 rounded-lg border-l-4 border-amber-500">
             <h3 className="text-lg font-bold text-stone-800 mb-2">{fossil.species}</h3>
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <p className="text-stone-600 font-semibold">Age</p>
-                <p className="text-stone-800">{fossil.estimatedAge} million years</p>
-              </div>
-              <div>
-                <p className="text-stone-600 font-semibold">Weight</p>
-                <p className="text-stone-800">{fossil.weight}kg</p>
-              </div>
-              <div>
-                <p className="text-stone-600 font-semibold">Era</p>
-                <p className="text-stone-800">{fossil.era}</p>
-              </div>
-              <div>
-                <p className="text-stone-600 font-semibold">Location</p>
-                <p className="text-stone-800">{fossil.discoveryLocation}</p>
-              </div>
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              {[
+                ['Age',      `${fossil.estimatedAge} million years`],
+                ['Weight',   `${fossil.weight} kg`],
+                ['Era',       fossil.era],
+                ['Location',  fossil.discoveryLocation],
+              ].map(([label, value]) => (
+                <div key={label}>
+                  <p className="text-stone-500 font-semibold uppercase text-xs">{label}</p>
+                  <p className="text-stone-800">{value}</p>
+                </div>
+              ))}
             </div>
           </div>
 
-          {/* AI Description Loading/Result */}
-          {loading ? (
-            <div className="flex flex-col items-center justify-center py-12">
-              <div className="mb-4">
-                <div className="inline-block">
-                  <div className="w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
-                </div>
-              </div>
-              <p className="text-stone-600 text-lg">Claude is analyzing this fossil...</p>
-              <p className="text-stone-500 text-sm mt-2">Generating scientifically accurate description...</p>
+          {/* Streaming area */}
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <h4 className="text-base font-semibold text-blue-700">📖 Generated Description</h4>
+              {isStreaming && (
+                <span className="flex items-center gap-1 text-xs text-stone-400">
+                  <span className="inline-block w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                  Claude is writing…
+                </span>
+              )}
             </div>
-          ) : (
-            <div className="space-y-4">
-              <div>
-                <h4 className="text-lg font-semibold text-blue-600 mb-3">📖 Generated Description</h4>
-                <div className="bg-blue-50 p-4 rounded-lg border border-blue-200 text-stone-700 leading-relaxed">
-                  <p>{mockAIDescription}</p>
-                </div>
-              </div>
 
-              {/* Copy Button */}
-              <div className="flex gap-2">
-                <button
-                  onClick={handleCopy}
-                  className={`flex-1 px-4 py-2 rounded font-semibold transition-all duration-200 flex items-center justify-center gap-2 ${
-                    isCopied
-                      ? 'bg-green-500 text-white'
-                      : 'bg-blue-600 text-white hover:bg-blue-700'
-                  }`}
-                >
-                  <span>{isCopied ? '✓' : '📋'}</span>
-                  <span>{isCopied ? 'Copied!' : 'Copy to Clipboard'}</span>
-                </button>
-              </div>
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 min-h-[120px] text-stone-700 leading-relaxed whitespace-pre-wrap">
+              {streamedText || (
+                <span className="text-stone-400 italic">Waiting for Claude…</span>
+              )}
+              {/* blinking cursor while streaming */}
+              {isStreaming && (
+                <span className="inline-block w-0.5 h-4 bg-blue-500 ml-0.5 align-middle animate-pulse" />
+              )}
+            </div>
 
-              {/* Info Box */}
-              <div className="p-4 bg-purple-50 rounded-lg border border-purple-200">
-                <p className="text-sm text-purple-900">
-                  💡 <strong>Pro Tip:</strong> This description was generated by Claude API based on paleontological data. 
-                  You can use this to populate your CRM database or export for documentation.
-                </p>
-              </div>
+            {streamError && (
+              <p className="mt-2 text-xs text-amber-600">
+                ⚠️ {streamError} — showing fallback description.
+              </p>
+            )}
+          </div>
+
+          {/* Actions — shown only after streaming completes */}
+          {!isStreaming && streamedText && (
+            <div className="flex gap-3">
+              <button
+                onClick={handleCopy}
+                className={`flex-1 px-4 py-2 rounded-lg font-semibold text-sm flex items-center justify-center gap-2 transition-all duration-200 ${
+                  isCopied
+                    ? 'bg-green-500 text-white'
+                    : 'bg-blue-600 hover:bg-blue-700 text-white'
+                }`}
+              >
+                <span>{isCopied ? '✓' : '📋'}</span>
+                <span>{isCopied ? 'Copied!' : 'Copy to Clipboard'}</span>
+              </button>
             </div>
           )}
+
+          {/* Tip */}
+          <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg text-sm text-purple-900">
+            💡 <strong>Pro Tip:</strong> Descriptions are generated by Claude and persisted to your CRM database automatically.
+          </div>
         </div>
 
         {/* Footer */}
-        <div className="bg-stone-50 px-6 py-4 border-t border-stone-200 flex gap-3">
+        <div className="bg-stone-50 px-6 py-4 border-t border-stone-200 rounded-b-xl">
           <button
-            onClick={onClose}
-            className="flex-1 px-4 py-2 bg-stone-200 text-stone-800 rounded font-semibold hover:bg-stone-300 transition"
+            onClick={handleClose}
+            className="w-full px-4 py-2 bg-stone-200 hover:bg-stone-300 text-stone-800 rounded-lg font-semibold transition-colors"
           >
             Close
-          </button>
-          <button
-            className="flex-1 px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded font-semibold hover:from-blue-700 hover:to-purple-700 transition"
-          >
-            Save & Update
           </button>
         </div>
       </div>
     </div>
   );
 };
+
+// ── Fallback description if streaming fails ────────────────────────────────────
+function buildFallbackDescription(fossil) {
+  return `This remarkable ${fossil.species} specimen from the ${fossil.era} period represents ` +
+    `a significant addition to our paleontological understanding. Weighing approximately ` +
+    `${fossil.weight} kg and estimated at ${fossil.estimatedAge} million years old, this fossil ` +
+    `showcases exceptional preservation. The specimen was discovered at ${fossil.discoveryLocation} ` +
+    `and is now part of the ${fossil.collectionName} collection.`;
+}
