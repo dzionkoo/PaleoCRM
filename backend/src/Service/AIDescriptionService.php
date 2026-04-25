@@ -7,19 +7,27 @@ namespace PaleoCRM\Service;
 use PaleoCRM\Entity\DinoFossil;
 
 /**
- * AIDescriptionService - Claude AI Integration
+ * AIDescriptionService - Claude AI Integration (Updated)
  * 
  * Handles communication with Claude API for intelligent fossil descriptions
- * Demonstrates dependency injection and external service abstraction
+ * Now uses environment variables for configuration and supports streaming
  */
 final class AIDescriptionService
 {
     private const API_ENDPOINT = 'https://api.anthropic.com/v1/messages';
-    private const MODEL = 'claude-3-5-sonnet-20241022';
+    private const DEFAULT_MODEL = 'claude-sonnet-4-20250514';
+
+    private readonly string $model;
 
     public function __construct(
         private readonly string $apiKey,
-    ) {}
+        string $model = self::DEFAULT_MODEL,
+    ) {
+        if (empty($apiKey)) {
+            throw new \RuntimeException('ANTHROPIC_API_KEY is required for AIDescriptionService');
+        }
+        $this->model = $model;
+    }
 
     /**
      * Generate AI description for a fossil using Claude API
@@ -33,7 +41,7 @@ final class AIDescriptionService
         $prompt = $this->buildPrompt($fossil);
 
         $payload = [
-            'model' => self::MODEL,
+            'model' => $this->model,
             'max_tokens' => 1024,
             'system' => 'You are a paleontology expert. Generate engaging, scientifically accurate descriptions of fossils. Keep descriptions concise but informative (100-300 words).',
             'messages' => [
@@ -58,10 +66,34 @@ final class AIDescriptionService
     }
 
     /**
-     * Build prompt for Claude based on fossil characteristics
+     * Stream AI description using ReadableStream pattern
      * 
-     * @param DinoFossil $fossil Fossil entity
-     * @return string Formatted prompt for Claude
+     * @param DinoFossil $fossil Fossil to describe
+     * @param callable $onChunk Callback for each streamed chunk
+     * @return void
+     */
+    public function generateDescriptionStream(DinoFossil $fossil, callable $onChunk): void
+    {
+        $prompt = $this->buildPrompt($fossil);
+
+        $payload = [
+            'model' => $this->model,
+            'max_tokens' => 1024,
+            'stream' => true,
+            'system' => 'You are a paleontology expert. Generate engaging, scientifically accurate descriptions of fossils.',
+            'messages' => [
+                [
+                    'role' => 'user',
+                    'content' => $prompt,
+                ]
+            ]
+        ];
+
+        $this->callClaudeAPIStream($payload, $onChunk);
+    }
+
+    /**
+     * Build prompt for Claude based on fossil characteristics
      */
     private function buildPrompt(DinoFossil $fossil): string
     {
@@ -89,10 +121,6 @@ PROMPT;
 
     /**
      * Call Claude API with proper error handling
-     * 
-     * @param array<string, mixed> $payload API request payload
-     * @return array<string, mixed> API response
-     * @throws \RuntimeException on API error
      */
     private function callClaudeAPI(array $payload): array
     {
@@ -136,5 +164,42 @@ PROMPT;
         }
 
         return $decoded;
+    }
+
+    /**
+     * Stream Claude API response
+     */
+    private function callClaudeAPIStream(array $payload, callable $onChunk): void
+    {
+        $ch = curl_init(self::API_ENDPOINT);
+
+        if ($ch === false) {
+            throw new \RuntimeException('Failed to initialize cURL');
+        }
+
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => false,
+            CURLOPT_HTTPHEADER => [
+                'Content-Type: application/json',
+                'x-api-key: ' . $this->apiKey,
+                'anthropic-version: 2023-06-01',
+            ],
+            CURLOPT_POSTFIELDS => json_encode($payload),
+            CURLOPT_TIMEOUT => 60,
+            CURLOPT_WRITEFUNCTION => function($curl, $data) use ($onChunk) {
+                $onChunk($data);
+                return strlen($data);
+            }
+        ]);
+
+        curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+
+        curl_close($ch);
+
+        if ($error || $httpCode !== 200) {
+            throw new \RuntimeException("Claude API stream error: {$error} (HTTP {$httpCode})");
+        }
     }
 }

@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
  * useFossilData Hook - Custom hook for fossil data management
  * 
  * Manages:
- * - Fetching fossils from API
+ * - Fetching fossils from real PHP API
  * - Pagination state
  * - Loading and error states
  * - Selected fossil state
@@ -15,26 +15,54 @@ export const useFossilData = () => {
   const [error, setError] = useState(null);
   const [page, setPage] = useState(1);
   const [selectedFossil, setSelectedFossil] = useState(null);
+  const [status, setStatus] = useState(''); // Status filter
 
   useEffect(() => {
     fetchFossils();
-  }, [page]);
+  }, [page, status]);
 
   const fetchFossils = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // Mock API call - replace with real endpoint
-      const mockFossils = getMockFossils((page - 1) * 20, 20);
-      
-      // Simulate network delay
-      await new Promise(resolve => setTimeout(resolve, 800));
+      // Build query parameters
+      const params = new URLSearchParams({
+        page: page.toString(),
+        pageSize: '20',
+      });
 
-      setFossils(mockFossils);
+      if (status) {
+        params.append('status', status);
+      }
+
+      // Call real API endpoint
+      const response = await fetch(
+        `http://localhost:8000/api/fossils?${params.toString()}`,
+        {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to fetch fossils');
+      }
+
+      setFossils(data.data || []);
     } catch (err) {
       setError(err?.message || 'Failed to fetch fossils');
       console.error('Error fetching fossils:', err);
+      // Fall back to mock data for demo purposes
+      setFossils(getMockFossils(0, 20));
     } finally {
       setLoading(false);
     }
@@ -48,11 +76,15 @@ export const useFossilData = () => {
     setPage,
     selectedFossil,
     setSelectedFossil,
+    status,
+    setStatus,
+    refetch: fetchFossils, // Allow manual refetch after create/update
   };
 };
 
 /**
- * Generate mock fossil data for demo
+ * Generate mock fossil data for demo fallback
+ * Used when API is unavailable for testing
  */
 const getMockFossils = (offset, limit) => {
   const allFossils = [
