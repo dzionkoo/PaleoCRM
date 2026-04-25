@@ -1,8 +1,8 @@
-# 🦖 PaleoCRM - Senior Portfolio Project
+# 🦖 PaleoCRM - Portfolio Project
 
 > **Legacy PHP to Modern Symfony: A Comprehensive Refactoring Showcase**
 >
-> Demonstrating senior-level fullstack development skills through a CRM system for managing archaeological/paleontological resources with emphasis on legacy code modernization using Claude Code.
+> Demonstrating skills through a CRM system for managing archaeological/paleontological resources with emphasis on legacy code modernization using Claude Code.
 
 ## 🎯 Project Overview
 
@@ -227,6 +227,6 @@ See full documentation in `/docs` directory:
 
 ---
 
-**Made with 🦖 by Senior Fullstack Developer**
+**Made with 🦖 by Fullstack Developer**
 
 *Showcasing: PHP 8.3 • React 18 • Modern Architecture • Testing Excellence • Claude Code Integration*
