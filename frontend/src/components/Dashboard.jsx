@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { FossilCard } from './FossilCard';
 import { AIDescriptionModal } from './AIDescriptionModal';
+import { CreateFossilModal } from './CreateFossilModal';
 import { useFossilData } from '../hooks/useFossilData';
 
 /**
@@ -23,9 +24,11 @@ export const Dashboard = () => {
     selectedFossil, 
     setSelectedFossil,
     status,
-    setStatus 
+    setStatus,
+    refetch
   } = useFossilData();
   const [showModal, setShowModal] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
 
   const handleAISuggest = (fossil) => {
@@ -42,6 +45,15 @@ export const Dashboard = () => {
   const handleCloseModal = () => {
     setShowModal(false);
     setSelectedFossil(null);
+  };
+
+  const handleFossilCreated = () => {
+    // Refresh the fossil list
+    setPage(1);
+    setStatus('');
+    if (refetch) {
+      refetch();
+    }
   };
 
   return (
@@ -78,41 +90,54 @@ export const Dashboard = () => {
             <p className="ml-4 text-lg text-stone-600">Loading fossils from the database...</p>
           </div>
         )}
-
-        {/* Fossils Grid */}
-        {!loading && fossils.length > 0 && (
-          <>
-            <div className="mb-8">
+        
+        {/* Controls Section (Always Visible When Not Loading) */}
+        {!loading && (
+          <div className="mb-8 flex items-center justify-between">
+            <div>
               <h2 className="text-3xl font-bold text-stone-800 mb-4">
                 Fossil Collection ({fossils.length} items)
               </h2>
               <p className="text-stone-600 mb-6">
                 Welcome to PaleoCRM - a modern demonstration of legacy code refactoring from PHP 5.6 to 8.3
               </p>
-
-              {/* Status Filter */}
-              <div className="mb-6 flex items-center gap-4">
-                <label className="text-stone-700 font-semibold">Filter by Status:</label>
-                <select
-                  value={status}
-                  onChange={(e) => {
-                    setStatus(e.target.value);
-                    setPage(1); // Reset to first page when filtering
-                  }}
-                  className="px-4 py-2 border border-amber-300 rounded bg-white text-stone-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
-                >
-                  <option value="">All Statuses</option>
-                  <option value="discovered">Discovered</option>
-                  <option value="analyzed">Analyzed</option>
-                  <option value="extinct">Extinct</option>
-                  <option value="pending-analysis">Pending Analysis</option>
-                  <option value="documented">Documented</option>
-                </select>
-              </div>
             </div>
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="px-6 py-3 bg-amber-900 text-white rounded-lg font-semibold hover:bg-amber-800 transition-colors whitespace-nowrap"
+            >
+              ✨ Add Fossil
+            </button>
+          </div>
+        )}
 
+        {/* Status Filter (Always Visible When Not Loading) */}
+        {!loading && (
+          <div className="mb-6 flex items-center gap-4">
+            <label className="text-stone-700 font-semibold">Filter by Status:</label>
+            <select
+              value={status}
+              onChange={(e) => {
+                setStatus(e.target.value);
+                setPage(1); // Reset to first page when filtering
+              }}
+              className="px-4 py-2 border border-amber-300 rounded bg-white text-stone-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
+            >
+              <option value="">All Statuses</option>
+              <option value="discovered">Discovered</option>
+              <option value="analyzed">Analyzed</option>
+              <option value="extinct">Extinct</option>
+              <option value="pending-analysis">Pending Analysis</option>
+              <option value="documented">Documented</option>
+            </select>
+          </div>
+        )}
+
+        {/* Fossils Grid */}
+        {!loading && fossils.length > 0 && (
+          <>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
-              {fossils.map((fossil) => (
+            {fossils.map((fossil) => (
                 <FossilCard
                   key={fossil.id}
                   fossil={fossil}
@@ -148,7 +173,13 @@ export const Dashboard = () => {
           <div className="text-center py-12">
             <div className="text-6xl mb-4">🦕</div>
             <h3 className="text-2xl font-bold text-stone-800 mb-2">No Fossils Found</h3>
-            <p className="text-stone-600">The Paleocene Valley is quiet today...</p>
+            <p className="text-stone-600 mb-8">The Paleocene Valley is quiet today...</p>
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="px-8 py-3 bg-amber-900 text-white rounded-lg font-semibold hover:bg-amber-800 transition-colors"
+            >
+              ✨ Add First Fossil
+            </button>
           </div>
         )}
       </main>
@@ -159,6 +190,14 @@ export const Dashboard = () => {
           fossil={selectedFossil}
           loading={aiLoading}
           onClose={handleCloseModal}
+        />
+      )}
+
+      {/* Create Fossil Modal */}
+      {showCreateModal && (
+        <CreateFossilModal
+          onClose={() => setShowCreateModal(false)}
+          onSuccess={handleFossilCreated}
         />
       )}
 

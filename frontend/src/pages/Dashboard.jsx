@@ -82,6 +82,11 @@ const Dashboard = () => {
             <p className="text-stone-500 text-sm mt-0.5">
               Legacy PHP to Modern PHP 8.3 refactoring demo · React 18 · Claude AI
             </p>
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="px-6 py-3 bg-amber-900 text-white rounded-lg font-semibold hover:bg-amber-800 transition-colors whitespace-nowrap">
+              ✨ Add Fossil
+            </button>
           </div>
 
           {/* Status filter */}

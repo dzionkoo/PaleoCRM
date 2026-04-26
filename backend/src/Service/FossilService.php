@@ -11,13 +11,6 @@ use DomainException;
 
 /**
  * FossilService - Business Logic Layer
- * 
- * Orchestrates operations combining:
- * ✨ Repository access
- * ✨ Validation
- * ✨ Business rules
- * ✨ External service integration (AI)
- * ✨ Error handling and logging
  */
 final class FossilService
 {
@@ -27,32 +20,41 @@ final class FossilService
     ) {}
 
     /**
-     * Get all fossils with optional AI descriptions
-     * 
-     * @param int $page Page number (1-based)
-     * @param int $pageSize Results per page
-     * @param bool $includeAIDescriptions Auto-populate AI descriptions if missing
-     * @return DinoFossil[] Array of fossils with descriptions
-     * @throws InvalidArgumentException if pagination parameters invalid
+     * Get fossils with optional status filter and AI descriptions.
+     *
+     * @param int    $page                  1-based page number
+     * @param int    $pageSize              Results per page
+     * @param bool   $includeAIDescriptions Auto-generate AI descriptions if missing
+     * @param string $status                Filter by status; '' means all statuses
+     * @return DinoFossil[]
      */
     public function getAllFossils(
-        int $page = 1,
-        int $pageSize = 20,
-        bool $includeAIDescriptions = false
+        int    $page                  = 1,
+        int    $pageSize              = 20,
+        bool   $includeAIDescriptions = false,
+        string $status                = '',        // ← NEW: '' = no filter
     ): array {
         if ($page < 1 || $pageSize < 1) {
-            throw new InvalidArgumentException('Page and pageSize must be positive integers');
+            throw new InvalidArgumentException('page and pageSize must be positive integers');
         }
 
         $offset = ($page - 1) * $pageSize;
-        $fossils = $this->repository->findAll($pageSize, $offset);
+
+        // Delegate to the right repository method based on whether a status was requested
+        $fossils = $status !== ''
+            ? $this->repository->findByStatus($status, $pageSize, $offset)
+            : $this->repository->findAll($pageSize, $offset);
 
         if ($includeAIDescriptions) {
             foreach ($fossils as $fossil) {
                 if ($fossil->getAIDescription() === null) {
-                    $description = $this->aiService->generateDescription($fossil);
-                    $fossil->setAIDescription($description);
-                    $this->repository->update($fossil);
+                    try {
+                        $description = $this->aiService->generateDescription($fossil);
+                        $fossil->setAIDescription($description);
+                        $this->repository->update($fossil);
+                    } catch (\Exception $e) {
+                        error_log('AI description generation failed: ' . $e->getMessage());
+                    }
                 }
             }
         }
@@ -61,10 +63,7 @@ final class FossilService
     }
 
     /**
-     * Get single fossil by ID with all related data
-     * 
-     * @param string $id Fossil identifier
-     * @return DinoFossil|null Fossil object or null if not found
+     * Get single fossil by ID.
      */
     public function getFossilById(string $id): ?DinoFossil
     {
@@ -76,77 +75,58 @@ final class FossilService
     }
 
     /**
-     * Create new fossil from user input
-     * 
-     * @param array<string, mixed> $data User-provided fossil data
-     * @return DinoFossil Created fossil with generated ID
-     * @throws InvalidArgumentException if data validation fails
-     * @throws DomainException if business rules violated
+     * Create a new fossil and optionally generate an AI description.
+     *
+     * @param array<string, mixed> $data
      */
     public function createFossilWithAIDescription(array $data): DinoFossil
     {
         $this->validateFossilData($data);
 
-        // Generate unique ID and timestamp
-        $fossilId = $this->generateFossilId();
-
-        // Create fossil entity
         $fossil = new DinoFossil(
-            id: $fossilId,
-            species: $data['species'],
-            collectionName: $data['collectionName'] ?? $data['species'],
-            estimatedAge: (int)$data['estimatedAge'],
-            weight: (float)$data['weight'],
-            status: $data['status'] ?? 'documented',
+            id:                $this->generateFossilId(),
+            species:           $data['species'],
+            collectionName:    $data['collectionName'] ?? $data['species'],
+            estimatedAge:      (int)   $data['estimatedAge'],
+            weight:            (float) $data['weight'],
+            status:            $data['status']            ?? 'documented',
             discoveryLocation: $data['discoveryLocation'] ?? 'Unknown',
         );
 
-        // Generate AI description if enabled
         if ($data['generateAIDescription'] ?? true) {
             try {
-                $aiDescription = $this->aiService->generateDescription($fossil);
-                $fossil->setAIDescription($aiDescription);
+                $fossil->setAIDescription($this->aiService->generateDescription($fossil));
             } catch (\Exception $e) {
-                // Log error but don't fail - creation succeeds without AI
                 error_log('AI description generation failed: ' . $e->getMessage());
             }
         }
 
-        // Persist to database
         $this->repository->create($fossil);
 
         return $fossil;
     }
 
     /**
-     * Update fossil status with validation
-     * 
-     * @param string $fossilId Fossil to update
-     * @param string $newStatus New status value
-     * @return void
-     * @throws InvalidArgumentException if fossil not found or status invalid
-     * @throws DomainException if status transition not allowed
+     * Transition a fossil to a new status.
      */
     public function updateStatus(string $fossilId, string $newStatus): void
     {
         $fossil = $this->repository->findById($fossilId);
 
         if ($fossil === null) {
-            throw new InvalidArgumentException("Fossil with ID '{$fossilId}' not found");
+            throw new InvalidArgumentException("Fossil '{$fossilId}' not found");
         }
 
-        // Validate status transition (prevent invalid transitions)
         $this->validateStatusTransition($fossil->status, $newStatus);
 
-        // Create new fossil with updated status
         $updated = new DinoFossil(
-            id: $fossil->id,
-            species: $fossil->species,
-            collectionName: $fossil->collectionName,
-            estimatedAge: $fossil->estimatedAge,
-            weight: $fossil->weight,
-            status: $newStatus, // ← New status
-            discoveryLocation: $fossil->discoveryLocation,
+            id:                    $fossil->id,
+            species:               $fossil->species,
+            collectionName:        $fossil->collectionName,
+            estimatedAge:          $fossil->estimatedAge,
+            weight:                $fossil->weight,
+            status:                $newStatus,
+            discoveryLocation:     $fossil->discoveryLocation,
             aiGeneratedDescription: $fossil->getAIDescription(),
         );
 
@@ -154,210 +134,130 @@ final class FossilService
     }
 
     /**
-     * Get velocity report for all dinosaurs
-     * Classifies by theoretical velocity
-     * 
-     * @return array Statistics grouped by velocity category
+     * Velocity report — classifies every fossil by theoretical velocity.
      */
     public function getVelocityReport(): array
     {
         $fossils = $this->repository->findAll(limit: 1000);
 
-        $velocityCategories = [
-            'raptor-speed' => 0,
-            'fast' => 0,
-            'medium' => 0,
-            'slow' => 0,
-            'immobile' => 0,
-        ];
+        $cats = ['raptor-speed' => 0, 'fast' => 0, 'medium' => 0, 'slow' => 0, 'immobile' => 0];
 
         foreach ($fossils as $fossil) {
-            $velocity = $fossil->getTheoreticalVelocity();
+            $v = $fossil->getTheoreticalVelocity();
 
-            if ($velocity === 'raptor-speed (40 km/h)') {
-                $velocityCategories['raptor-speed']++;
-            } elseif (is_int($velocity)) {
-                if ($velocity >= 18) {
-                    $velocityCategories['fast']++;
-                } elseif ($velocity >= 10) {
-                    $velocityCategories['medium']++;
-                } elseif ($velocity > 0) {
-                    $velocityCategories['slow']++;
-                } else {
-                    $velocityCategories['immobile']++;
-                }
+            if ($v === 'raptor-speed (40 km/h)') {
+                $cats['raptor-speed']++;
+            } elseif (is_int($v)) {
+                if ($v >= 18)     $cats['fast']++;
+                elseif ($v >= 10) $cats['medium']++;
+                elseif ($v > 0)   $cats['slow']++;
+                else              $cats['immobile']++;
             } else {
-                $velocityCategories['unknown'] = ($velocityCategories['unknown'] ?? 0) + 1;
+                $cats['unknown'] = ($cats['unknown'] ?? 0) + 1;
             }
         }
 
         return [
             'total_fossils' => count($fossils),
-            'by_velocity' => $velocityCategories,
-            'generated_at' => (new \DateTime())->format(\DateTime::ATOM),
-            'easter_egg' => '🦕 "If they could travel back in time, they would"',
+            'by_velocity'   => $cats,
+            'generated_at'  => (new \DateTime())->format(\DateTime::ATOM),
         ];
     }
 
     /**
-     * Batch update multiple fossils (transaction-safe)
-     * 
-     * @param array<string, string> $updates Key: fossil_id, Value: new_status
-     * @return int Number of successfully updated fossils
-     * @throws InvalidArgumentException if any update would be invalid
+     * Batch-update statuses (all-or-nothing).
+     *
+     * @param array<string, string> $updates  fossil_id => new_status
      */
     public function batchUpdateStatus(array $updates): int
     {
-        // Pre-validate all updates before executing
         foreach ($updates as $id => $status) {
             $fossil = $this->repository->findById($id);
             if ($fossil === null) {
-                throw new InvalidArgumentException("Fossil with ID '{$id}' not found");
+                throw new InvalidArgumentException("Fossil '{$id}' not found");
             }
             $this->validateStatusTransition($fossil->status, $status);
         }
 
-        // Execute batch update (all or nothing)
         return $this->repository->batchUpdateStatus($updates);
     }
 
     /**
-     * Export fossils to CSV format
-     * Properly escapes data to prevent injection attacks
-     * 
-     * @param string $status Filter by status (or '' for all)
-     * @return string CSV formatted data
+     * Export fossils to CSV.
      */
     public function exportFossilsToCSV(string $status = ''): string
     {
-        $fossils = empty($status)
-            ? $this->repository->findAll(limit: 5000)
-            : $this->repository->findByStatus($status, limit: 5000);
+        $fossils = $status !== ''
+            ? $this->repository->findByStatus($status, limit: 5000)
+            : $this->repository->findAll(limit: 5000);
 
-        $output = '';
-        $memoryFile = fopen('php://memory', 'r+');
-
-        if ($memoryFile === false) {
-            throw new \RuntimeException('Failed to create memory stream for CSV');
+        $mem = fopen('php://memory', 'r+');
+        if ($mem === false) {
+            throw new \RuntimeException('Failed to open memory stream');
         }
 
-        // Write CSV header
-        fputcsv($memoryFile, [
-            'ID',
-            'Species',
-            'Collection Name',
-            'Estimated Age (years)',
-            'Weight (kg)',
-            'Status',
-            'Discovery Location',
-            'ERA',
-        ]);
+        fputcsv($mem, ['ID', 'Species', 'Collection Name', 'Estimated Age (MY)', 'Weight (kg)', 'Status', 'Discovery Location', 'Era']);
 
-        // Write fossil data rows (fputcsv handles escaping automatically)
         foreach ($fossils as $fossil) {
-            $data = $fossil->toArray();
-            fputcsv($memoryFile, [
-                $data['id'],
-                $data['species'],
-                $data['collectionName'],
-                $data['estimatedAge'],
-                $data['weight'],
-                $data['status'],
-                $data['discoveryLocation'],
-                $data['era'],
-            ]);
+            $d = $fossil->toArray();
+            fputcsv($mem, [$d['id'], $d['species'], $d['collectionName'], $d['estimatedAge'], $d['weight'], $d['status'], $d['discoveryLocation'], $d['era']]);
         }
 
-        // Read from memory stream
-        rewind($memoryFile);
-        $output = stream_get_contents($memoryFile);
-        fclose($memoryFile);
+        rewind($mem);
+        $csv = stream_get_contents($mem);
+        fclose($mem);
 
-        return $output ?: '';
+        return $csv ?: '';
     }
 
-    /**
-     * Are they truly extinct? (Easter Egg Easter Egg!)
-     * "Better ask Claude first 🤖"
-     * 
-     * @return bool True if we should probably ask Claude
-     */
     public function areTheyTrulyExtinct(): bool
     {
-        // Philosophical question: asks Claude before confirming
         return true; // Always consult Claude
     }
 
-    /**
-     * Validate fossil creation data
-     * 
-     * @param array<string, mixed> $data User input
-     * @throws InvalidArgumentException if validation fails
-     */
+    // ── Private helpers ───────────────────────────────────────────────────────
+
     private function validateFossilData(array $data): void
     {
         if (empty($data['species'])) {
             throw new InvalidArgumentException('Species name is required');
         }
-
-        if (empty($data['estimatedAge']) || (int)$data['estimatedAge'] < 0) {
+        if (!isset($data['estimatedAge']) || (int) $data['estimatedAge'] < 0) {
             throw new InvalidArgumentException('Estimated age must be a positive number');
         }
-
-        if (empty($data['weight']) || (float)$data['weight'] <= 0) {
+        if (empty($data['weight']) || (float) $data['weight'] <= 0) {
             throw new InvalidArgumentException('Weight must be a positive number');
         }
-
         if (isset($data['status'])) {
             try {
-                new DinoFossil('temp', $data['species'], $data['species'], 0, 0.1, $data['status']);
+                new DinoFossil('tmp', $data['species'], $data['species'], 0, 0.1, $data['status']);
             } catch (\InvalidArgumentException $e) {
                 throw new InvalidArgumentException('Invalid fossil status: ' . $e->getMessage());
             }
         }
     }
 
-    /**
-     * Validate status transition (prevent invalid state changes)
-     * 
-     * @param string $currentStatus Current status
-     * @param string $newStatus Target status
-     * @throws DomainException if transition invalid
-     */
-    private function validateStatusTransition(string $currentStatus, string $newStatus): void
+    private function validateStatusTransition(string $current, string $next): void
     {
-        // Define allowed transitions
-        $allowedTransitions = [
-            'documented' => ['pending-analysis', 'extinct', 'active'],
+        $allowed = [
+            'documented'       => ['pending-analysis', 'extinct', 'active'],
             'pending-analysis' => ['documented', 'extinct', 'active'],
-            'active' => ['documented', 'extinct'],
-            'extinct' => ['documented'], // Can be re-classified
+            'active'           => ['documented', 'extinct'],
+            'extinct'          => ['documented'],
         ];
 
-        if (!isset($allowedTransitions[$currentStatus])) {
-            throw new DomainException("Unknown status: {$currentStatus}");
+        if (!isset($allowed[$current])) {
+            throw new DomainException("Unknown status: {$current}");
         }
-
-        if (!in_array($newStatus, $allowedTransitions[$currentStatus], true)) {
+        if (!in_array($next, $allowed[$current], true)) {
             throw new DomainException(
-                "Invalid transition from '{$currentStatus}' to '{$newStatus}'. Allowed: " .
-                implode(', ', $allowedTransitions[$currentStatus])
+                "Invalid transition '{$current}' → '{$next}'. Allowed: " . implode(', ', $allowed[$current])
             );
         }
     }
 
-    /**
-     * Generate unique fossil ID
-     * Format: FOSSIL_<timestamp>_<random>
-     * 
-     * @return string Generated UUID-like identifier
-     */
     private function generateFossilId(): string
     {
-        return sprintf(
-            'FOSSIL_%s_%s',
-            (new \DateTime())->format('YmdHis'),
-            bin2hex(random_bytes(4))
-        );
+        return sprintf('FOSSIL_%s_%s', (new \DateTime())->format('YmdHis'), bin2hex(random_bytes(4)));
     }
 }
