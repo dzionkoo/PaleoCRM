@@ -3,7 +3,7 @@
         'name' => 'paleocene/palecrm',
         'pretty_version' => 'dev-main',
         'version' => 'dev-main',
-        'reference' => '2a47ff660fc4bf560a4052f7ca9ff39ac2b039aa',
+        'reference' => '57f1fcf0cac8ad9f4eb50c23fba93036f92784b3',
         'type' => 'project',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
@@ -31,7 +31,7 @@
         'paleocene/palecrm' => array(
             'pretty_version' => 'dev-main',
             'version' => 'dev-main',
-            'reference' => '2a47ff660fc4bf560a4052f7ca9ff39ac2b039aa',
+            'reference' => '57f1fcf0cac8ad9f4eb50c23fba93036f92784b3',
             'type' => 'project',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),

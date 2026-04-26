@@ -16,10 +16,10 @@ declare(strict_types=1);
  *   POST   /api/fossils/{id}/ai-describe → generate & return AI description
  */
 
-require_once __DIR__ . '/vendor/autoload.php';
+require_once __DIR__ . '/../vendor/autoload.php';
 
 // ── 1. Load .env ──────────────────────────────────────────────────────────────
-$envFile = __DIR__ . '/.env';
+$envFile = __DIR__ . '/../.env';
 if (file_exists($envFile)) {
     foreach (file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
         if (str_starts_with(trim($line), '#') || !str_contains($line, '=')) {
@@ -31,7 +31,7 @@ if (file_exists($envFile)) {
 }
 
 // ── 2. CORS headers (must be sent before any output) ─────────────────────────
-$allowedOrigins = explode(',', $_ENV['CORS_ORIGINS'] ?? 'http://localhost:5173,http://localhost:3000');
+$allowedOrigins = explode(',', $_ENV['CORS_ALLOWED_ORIGINS'] ?? 'http://localhost:5173,http://localhost:3000');
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
 
 if (in_array($origin, $allowedOrigins, true) || ($_ENV['APP_ENV'] ?? 'production') === 'development') {
@@ -49,6 +49,20 @@ header('X-Dino-Powered: Velociraptors optimize this endpoint 🦖');
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);
     exit;
+}
+
+// ── Helper functions ──────────────────────────────────────────────────────────
+
+function respond(array $result): void
+{
+    sendJson($result['body'], $result['statusCode']);
+}
+
+function sendJson(array $data, int $status = 200): void
+{
+    header('Content-Type: application/json');
+    http_response_code($status);
+    echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 }
 
 // ── 3. Bootstrap services ─────────────────────────────────────────────────────
@@ -142,38 +156,29 @@ if ($method === 'POST' && preg_match('#^/api/fossils/([^/]+)/ai-describe$#', $ur
 // /api/fossils/{id}
 if (preg_match('#^/api/fossils/([^/]+)$#', $uri, $m)) {
     $id = $m[1];
-    match ($method) {
-        'GET'    => respond($controller->show($id)),
-        'PUT'    => respond($controller->update($id, $body)),
-        'DELETE' => respond($controller->delete($id)),
-        default  => sendJson(['success' => false, 'error' => 'Method not allowed'], 405),
-    };
+    if ($method === 'GET') {
+        respond($controller->show($id));
+    } elseif ($method === 'PUT') {
+        respond($controller->update($id, $body));
+    } elseif ($method === 'DELETE') {
+        respond($controller->delete($id));
+    } else {
+        sendJson(['success' => false, 'error' => 'Method not allowed'], 405);
+    }
     exit;
 }
 
 // /api/fossils
 if ($uri === '/api/fossils') {
-    match ($method) {
-        'GET'  => respond($controller->list($_GET)),
-        'POST' => respond($controller->create($body)),
-        default => sendJson(['success' => false, 'error' => 'Method not allowed'], 405),
-    };
+    if ($method === 'GET') {
+        respond($controller->list($_GET));
+    } elseif ($method === 'POST') {
+        respond($controller->create($body));
+    } else {
+        sendJson(['success' => false, 'error' => 'Method not allowed'], 405);
+    }
     exit;
 }
 
 // 404 fallback
 sendJson(['success' => false, 'error' => "Route not found: {$method} {$uri}"], 404);
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function respond(array $result): void
-{
-    sendJson($result['body'], $result['statusCode']);
-}
-
-function sendJson(array $data, int $status = 200): void
-{
-    header('Content-Type: application/json');
-    http_response_code($status);
-    echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-}
